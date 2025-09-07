@@ -10,7 +10,7 @@ import jakarta.persistence.OneToMany
 import jakarta.persistence.Table
 
 @Entity
-@Table(name = "skills", schema = "questions")
+@Table(name = "skills")
 @JsonIgnoreProperties("questions")
 data class Skill(
     @Id

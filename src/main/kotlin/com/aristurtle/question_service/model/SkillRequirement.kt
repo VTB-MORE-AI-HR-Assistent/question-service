@@ -10,7 +10,7 @@ import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 
 @Entity
-@Table(name = "skill_requirements", schema = "questions")
+@Table(name = "skill_requirements")
 data class SkillRequirement(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
