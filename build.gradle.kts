@@ -28,8 +28,6 @@ dependencies {
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
-//	implementation("org.springframework.ai:spring-ai-pdf-document-reader")
-//	implementation("org.springframework.ai:spring-ai-starter-model-openai")
 	runtimeOnly("org.postgresql:postgresql")
 	implementation("org.modelmapper:modelmapper:3.2.4")
 	testImplementation("org.springframework.boot:spring-boot-starter-test")

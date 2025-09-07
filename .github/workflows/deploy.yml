@@ -1,0 +1,138 @@
+name: Deploy question Service
+
+on:
+  push:
+    branches: [main, master, deploy-test, dev-last]
+    paths:
+      - "**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+env:
+  SERVICE_NAME: question-service
+  SERVICE_PORT: 8686
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Build with Gradle
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -x test
+        env:
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          SERVICE_PORT: ${{ env.SERVICE_PORT }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+
+      - name: Build Docker image
+        run: |
+          echo "Building Docker image..."
+          docker build -t ${{ env.SERVICE_NAME }}:${{ env.IMAGE_TAG }} .
+          echo "Docker image built successfully"
+
+          echo "Saving Docker image to tar.gz..."
+          docker save ${{ env.SERVICE_NAME }}:${{ env.IMAGE_TAG }} | gzip > ${{ env.SERVICE_NAME }}.tar.gz
+          echo "Docker image saved successfully"
+
+          echo "Checking if tar.gz file exists..."
+          ls -la ${{ env.SERVICE_NAME }}.tar.gz
+          echo "File size: $(du -h ${{ env.SERVICE_NAME }}.tar.gz)"
+
+      - name: Setup SSH
+        run: |
+          echo "Setting up SSH..."
+          # Try to create SSH directory
+          mkdir -p ~/.ssh || echo "Failed to create ~/.ssh directory"
+
+          # Check if directory exists
+          if [ ! -d ~/.ssh ]; then
+            echo "ERROR: Cannot create ~/.ssh directory"
+            ls -la ~/
+            exit 1
+          fi
+
+          # Write SSH key
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Add to known hosts
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          echo "SSH setup completed"
+
+      - name: Copy Docker image to server
+        run: |
+          echo "Checking if tar.gz file exists before copying..."
+          if [ ! -f "${{ env.SERVICE_NAME }}.tar.gz" ]; then
+            echo "ERROR: ${{ env.SERVICE_NAME }}.tar.gz file not found!"
+            ls -la
+            exit 1
+          fi
+
+          echo "Creating directory on server if it doesn't exist..."
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ${{ secrets.SERVER_PATH }} && ls -la ${{ secrets.SERVER_PATH }}"
+
+          echo "Copying Docker image to server..."
+          scp ${{ env.SERVICE_NAME }}.tar.gz \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.SERVER_PATH }}/${{ env.SERVICE_NAME }}.tar.gz
+          echo "Docker image copied successfully"
+
+      - name: Deploy to server
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'ENDSSH'
+            cd ${{ secrets.SERVER_PATH }}
+          
+            # Load Docker image
+            docker load < ${{ env.SERVICE_NAME }}.tar.gz
+            rm ${{ env.SERVICE_NAME }}.tar.gz
+          
+            # Stop and remove old container if exists
+            docker stop ${{ env.SERVICE_NAME }} 2>/dev/null || true
+            docker rm ${{ env.SERVICE_NAME }} 2>/dev/null || true
+          
+            # Create Docker network with custom subnet and DNS if not exists
+            docker network create --driver bridge --subnet=172.20.0.0/16 --ip-range=172.20.240.0/20 app-network 2>/dev/null || true
+          
+            # Connect postgres to app-network if not already connected
+            docker network connect app-network postgres 2>/dev/null || true
+          
+            # Debug environment variables
+            echo "Checking environment variables..."
+            echo "PG_USERNAME length: ${{secrets.PG_USERNAME}}"
+            echo "PG_PASSWORD length: ${{secrets.PG_PASSWORD}}"
+          
+            # Run new container with custom DNS settings
+            docker run -d \
+              --name ${{ env.SERVICE_NAME }} \
+              --restart unless-stopped \
+              --network app-network \
+              --dns=127.0.0.11 \
+              --dns-search=app-network \
+              -p ${{ env.SERVICE_PORT }}:${{ env.SERVICE_PORT }} \
+              -e PG_URL="jdbc:postgresql://user-db:5432/aihr" \
+              -e PG_USERNAME=${{ secrets.PG_USERNAME }} \
+              -e PG_PASSWORD="${{ secrets.PG_PASSWORD }}" \
+              -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+              ${{ env.SERVICE_NAME }}:${{ env.IMAGE_TAG }}
+          
+            # Clean up old images
+            docker image prune -f
+          
+            # Check if container is running
+            sleep 5
+            docker ps | grep ${{ env.SERVICE_NAME }}
+          
+            echo "Deployment completed successfully!"
+          ENDSSH
