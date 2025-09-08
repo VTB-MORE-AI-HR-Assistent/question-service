@@ -1,8 +1,8 @@
 spring:
   datasource:
-    url: jdbc:postgresql://user-db:5432/aihr
-    username: postgres
-    password: postgres
+    url: ${PG_URL:jdbc:postgresql://user-db:5432/aihr}
+    username: ${PG_USERNAME:postgres}
+    password: ${PG_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -36,7 +36,7 @@ springdoc:
     display-request-duration: true
 
 server:
-  port: 8686
+  port: ${QUESTION_SERVICE_PORT:8085}
 
 logging:
   level:
